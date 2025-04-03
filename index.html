@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Shapley值计算器</title>
+    <style>
+        .container { margin: 20px; max-width: 800px; }
+        .participant-section, .contributions-section { margin-bottom: 20px; }
+        .participant { display: inline-block; margin: 5px; padding: 5px; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 5px 10px; cursor: pointer; }
+        .subset-input { margin: 5px; padding: 5px; border-bottom: 1px solid #eee; }
+        .results { margin-top: 20px; padding: 10px; background: #f5f5f5; }
+        input[type="number"] { width: 80px; padding: 5px; }
+        .permutations { max-height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Shapley值计算器</h1>
+        
+        <div class="participant-section">
+            <h2>参与者管理</h2>
+            <button onclick="addParticipant()">+ 添加参与者</button>
+            <div id="participants"></div>
+        </div>
+
+        <div class="contributions-section">
+            <h2>子集贡献值设置</h2>
+            <div id="subsetInputs"></div>
+        </div>
+
+        <button onclick="calculateShapley()">计算Shapley值</button>
+        
+        <div class="results">
+            <h3>计算结果：</h3>
+            <div id="shapleyResults"></div>
+            <h4>计算过程：</h4>
+            <div class="permutations" id="permutations"></div>
+        </div>
+    </div>
+
+<script>
+let participants = [];
+let contributionCache = new Map();
+
+function addParticipant() {
+    const newId = participants.length;
+    participants.push({ 
+        id: newId,
+        name: `P${newId + 1}`,
+        color: `hsl(${newId * 60}, 70%, 50%)`
+    });
+    updateUI();
+}
+
+function removeParticipant(id) {
+    participants = participants.filter(p => p.id !== id);
+    participants.forEach((p, index) => p.id = index);
+    updateUI();
+}
+
+function updateUI() {
+    // 更新参与者显示
+    document.getElementById('participants').innerHTML = participants
+        .map(p => `
+            <div class="participant" style="border-color: ${p.color}">
+                ${p.name}
+                <button onclick="removeParticipant(${p.id})">×</button>
+            </div>
+        `).join('');
+    
+    // 生成子集输入框
+    const subsets = Array.from({length: 1 << participants.length}, (_, mask) => 
+        participants.filter(p => mask & (1 << p.id)));
+    
+    document.getElementById('subsetInputs').innerHTML = subsets
+        .map(subset => {
+            const key = subset.map(p => p.id).join(',');
+            const label = subset.length ? subset.map(p => p.name).join('+') : '空集';
+            return `
+                <div class="subset-input">
+                    <span style="width:150px;display:inline-block">${label}:</span>
+                    <input type="number" id="s${key}" 
+                           value="${cachedValue(key) || subset.length}" 
+                           onchange="saveValue('${key}', this.value)">
+                </div>
+            `;
+        }).join('');
+}
+
+function saveValue(key, value) {
+    contributionCache.set(key, Number(value));
+}
+
+function cachedValue(key) {
+    return contributionCache.has(key) ? contributionCache.get(key) : null;
+}
+
+function calculateShapley() {
+    const n = participants.length;
+    if (!n) return;
+
+    // 收集所有子集价值
+    const values = new Map();
+    for (let mask = 0; mask < (1 << n); mask++) {
+        const subset = participants.filter(p => mask & (1 << p.id));
+        const key = subset.map(p => p.id).join(',');
+        const input = document.getElementById(`s${key}`);
+        values.set(mask, Number(input.value));
+    }
+
+    // 计算Shapley值
+    const shapley = participants.map(() => 0);
+    const permutations = getPermutations(participants);
+    let processHTML = '';
+
+    permutations.forEach(perm => {
+        let process = `<b>排列: [${perm.map(p => p.name).join(' → ')}]</b><br>`;
+        let currentValue = 0;
+        const added = new Set();
+        
+        perm.forEach((player, idx) => {
+            const beforeMask = Array.from(added).reduce((m, p) => m | (1 << p.id), 0);
+            added.add(player);
+            const afterMask = beforeMask | (1 << player.id);
+            
+            const marginal = values.get(afterMask) - values.get(beforeMask);
+            shapley[player.id] += marginal;
+            
+            process += `&nbsp;&nbsp;${player.name}的边际贡献: ${values.get(afterMask)} - ${values.get(beforeMask)} = ${marginal}<br>`;
+        });
+        
+        processHTML += process + '<br>';
+    });
+
+    // 计算平均值
+    const factorial = n => n <= 1 ? 1 : n * factorial(n - 1);
+    const normalize = factorial(n - 1) / factorial(n);
+    
+    // 显示结果
+    document.getElementById('shapleyResults').innerHTML = participants
+        .map(p => `
+            <div style="color:${p.color}">
+                ${p.name}: ${(shapley[p.id] * normalize).toFixed(2)}
+            </div>
+        `).join('');
+    
+    document.getElementById('permutations').innerHTML = processHTML;
+}
+
+// 排列生成函数
+function getPermutations(arr) {
+    const result = [];
+    const permute = (arr, m = []) => {
+        if (arr.length === 0) {
+            result.push(m);
+        } else {
+            for (let i = 0; i < arr.length; i++) {
+                const curr = arr.slice();
+                const next = curr.splice(i, 1);
+                permute(curr.slice(), m.concat(next));
+            }
+        }
+    };
+    permute(arr);
+    return result;
+}
+
+// 初始化
+addParticipant();
+addParticipant();
+</script>
+</body>
+</html>
